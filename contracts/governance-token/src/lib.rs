@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, 
-    Address, Env, String, Symbol,
+    contract, contracterror, contractevent, contractimpl, contracttype,
+    Address, Env, String,
 };
 
 #[contracterror]
@@ -26,6 +26,39 @@ pub enum DataKey {
     TotalSupply,
 }
 
+// ── Events ────────────────────────────────────────────────────────
+#[contractevent]
+pub struct TokenInitialized {
+    #[topic]
+    pub admin: Address,
+    pub name: String,
+    pub symbol: String,
+    pub decimals: u32,
+}
+
+#[contractevent]
+pub struct TokenMinted {
+    #[topic]
+    pub to: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct TokenBurned {
+    #[topic]
+    pub from: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct TokenTransferred {
+    #[topic]
+    pub from: Address,
+    #[topic]
+    pub to: Address,
+    pub amount: i128,
+}
+
 #[contract]
 pub struct GovernanceToken;
 
@@ -34,16 +67,16 @@ impl GovernanceToken {
     /// Initializes the contract with the admin address and token setup.
     /// Requires admin authorization to prevent arbitrary initialization.
     pub fn init(
-        env: Env, 
-        admin: Address, 
-        name: String, 
-        symbol: String, 
-        decimals: u32
+        env: Env,
+        admin: Address,
+        name: String,
+        symbol: String,
+        decimals: u32,
     ) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
         }
-        
+
         // Security Fix: Require admin auth during initialization
         admin.require_auth();
 
@@ -53,10 +86,13 @@ impl GovernanceToken {
         env.storage().instance().set(&DataKey::Decimals, &decimals);
         env.storage().instance().set(&DataKey::TotalSupply, &0i128);
 
-        env.events().publish(
-            (symbol_short!("init"), admin),
-            (name, symbol, decimals)
-        );
+        TokenInitialized {
+            admin,
+            name,
+            symbol,
+            decimals,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -66,7 +102,8 @@ impl GovernanceToken {
             return Err(Error::InvalidAmount);
         }
 
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
+        let admin: Address =
+            env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
         admin.require_auth();
 
         let balance = Self::balance(env.clone(), to.clone());
@@ -77,7 +114,7 @@ impl GovernanceToken {
         let new_total_supply = total_supply.checked_add(amount).ok_or(Error::Overflow)?;
         env.storage().instance().set(&DataKey::TotalSupply, &new_total_supply);
 
-        env.events().publish((symbol_short!("mint"), to), amount);
+        TokenMinted { to, amount }.publish(&env);
         Ok(())
     }
 
@@ -87,7 +124,8 @@ impl GovernanceToken {
             return Err(Error::InvalidAmount);
         }
 
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
+        let admin: Address =
+            env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
         admin.require_auth();
 
         let balance = Self::balance(env.clone(), from.clone());
@@ -102,7 +140,7 @@ impl GovernanceToken {
         let new_total_supply = total_supply.checked_sub(amount).ok_or(Error::Overflow)?;
         env.storage().instance().set(&DataKey::TotalSupply, &new_total_supply);
 
-        env.events().publish((symbol_short!("burn"), from), amount);
+        TokenBurned { from, amount }.publish(&env);
         Ok(())
     }
 
@@ -125,7 +163,7 @@ impl GovernanceToken {
         let new_balance_to = balance_to.checked_add(amount).ok_or(Error::Overflow)?;
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &new_balance_to);
 
-        env.events().publish((symbol_short!("transfer"), from, to), amount);
+        TokenTransferred { from, to, amount }.publish(&env);
         Ok(())
     }
 
@@ -153,7 +191,7 @@ impl GovernanceToken {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Events, MockAuth, MockAuthInvoke};
+    use soroban_sdk::testutils::{Address as _, MockAuth, MockAuthInvoke};
     use soroban_sdk::{IntoVal};
 
     #[test]
@@ -169,10 +207,10 @@ mod test {
         let client = GovernanceTokenClient::new(&env, &contract_id);
 
         client.init(
-            &admin, 
-            &String::from_str(&env, "StellarCade Governance"), 
-            &String::from_str(&env, "SCG"), 
-            &18
+            &admin,
+            &String::from_str(&env, "StellarCade Governance"),
+            &String::from_str(&env, "SCG"),
+            &18,
         );
 
         client.mint(&user1, &1000);
@@ -199,10 +237,10 @@ mod test {
         let client = GovernanceTokenClient::new(&env, &contract_id);
 
         client.init(
-            &admin, 
-            &String::from_str(&env, "Test"), 
-            &String::from_str(&env, "T"), 
-            &0
+            &admin,
+            &String::from_str(&env, "Test"),
+            &String::from_str(&env, "T"),
+            &0,
         );
 
         // Use mock_auths to simulate authorization from malicious address

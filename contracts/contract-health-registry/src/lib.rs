@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
+    contract, contractevent, contractimpl, contracttype,
     Address, Env, Symbol, Vec,
 };
 
@@ -47,16 +47,14 @@ pub struct HealthPolicy {
 }
 
 // ── Events ────────────────────────────────────────────────────────
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct HealthReported {
     pub contract_id: Address,
     pub status: HealthStatus,
     pub timestamp: u64,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct PolicySet {
     pub contract_id: Address,
     pub policy_type: Symbol,
@@ -129,14 +127,12 @@ impl ContractHealthRegistry {
             .persistent()
             .set(&DataKey::HealthHistory(contract_id.clone()), &history);
 
-        env.events().publish(
-            (symbol_short!("health"),),
-            HealthReported {
-                contract_id,
-                status,
-                timestamp: report.timestamp,
-            },
-        );
+        HealthReported {
+            contract_id,
+            status,
+            timestamp: report.timestamp,
+        }
+        .publish(&env);
     }
 
     /// Set the health monitoring policy for a contract. Admin-only.
@@ -149,10 +145,7 @@ impl ContractHealthRegistry {
             .persistent()
             .set(&DataKey::HealthPolicy(contract_id.clone()), &policy);
 
-        env.events().publish(
-            (symbol_short!("policy"),),
-            PolicySet { contract_id, policy_type: policy.policy_type },
-        );
+        PolicySet { contract_id, policy_type: policy.policy_type }.publish(&env);
     }
 
     /// Get the most recent health report for a contract.

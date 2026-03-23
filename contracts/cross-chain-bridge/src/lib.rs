@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, 
+    contract, contracterror, contractevent, contractimpl, contracttype,
     token, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
@@ -25,12 +25,61 @@ pub enum Error {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
-    Validators, 
+    Validators,
     Quorum,
     TokenMapping(Symbol),
     WrappedTokenMapping(Address),
     ProcessedProofs(BytesN<32>),
     Paused,
+}
+
+// ── Events ────────────────────────────────────────────────────────
+#[contractevent]
+pub struct BridgeInitialized {
+    pub admin: Address,
+    pub quorum: u32,
+}
+
+#[contractevent]
+pub struct TokenLocked {
+    #[topic]
+    pub asset: Address,
+    #[topic]
+    pub from: Address,
+    pub amount: i128,
+    pub recipient_chain: Symbol,
+    pub recipient: String,
+}
+
+#[contractevent]
+pub struct WrappedMinted {
+    #[topic]
+    pub asset_symbol: Symbol,
+    #[topic]
+    pub recipient: Address,
+    pub amount: i128,
+    pub proof: BytesN<32>,
+}
+
+#[contractevent]
+pub struct WrappedBurned {
+    #[topic]
+    pub asset: Address,
+    #[topic]
+    pub from: Address,
+    pub amount: i128,
+    pub recipient_chain: Symbol,
+    pub recipient: String,
+}
+
+#[contractevent]
+pub struct TokenReleased {
+    #[topic]
+    pub asset: Address,
+    #[topic]
+    pub recipient: Address,
+    pub amount: i128,
+    pub proof: BytesN<32>,
 }
 
 #[contract]
@@ -39,8 +88,8 @@ pub struct CrossChainBridge;
 #[contractimpl]
 impl CrossChainBridge {
     pub fn init(
-        env: Env, 
-        admin: Address, 
+        env: Env,
+        admin: Address,
         validators: Vec<BytesN<32>>,
         quorum: u32,
     ) -> Result<(), Error> {
@@ -56,10 +105,7 @@ impl CrossChainBridge {
         env.storage().instance().set(&DataKey::Quorum, &quorum);
         env.storage().instance().set(&DataKey::Paused, &false);
 
-        env.events().publish(
-            (symbol_short!("init"),),
-            (admin, validators, quorum)
-        );
+        BridgeInitialized { admin, quorum }.publish(&env);
         Ok(())
     }
 
@@ -77,12 +123,12 @@ impl CrossChainBridge {
     }
 
     pub fn lock(
-        env: Env, 
+        env: Env,
         from: Address,
-        asset: Address, 
-        amount: i128, 
-        recipient_chain: Symbol, 
-        recipient: String
+        asset: Address,
+        amount: i128,
+        recipient_chain: Symbol,
+        recipient: String,
     ) -> Result<(), Error> {
         ensure_not_paused(&env)?;
         if amount <= 0 {
@@ -93,45 +139,54 @@ impl CrossChainBridge {
         let client = token::Client::new(&env, &asset);
         client.transfer(&from, &env.current_contract_address(), &amount);
 
-        env.events().publish(
-            (symbol_short!("lock"),),
-            (asset, from, amount, recipient_chain, recipient)
-        );
+        TokenLocked {
+            asset,
+            from,
+            amount,
+            recipient_chain,
+            recipient,
+        }
+        .publish(&env);
         Ok(())
     }
 
     pub fn mint_wrapped(
-        env: Env, 
-        asset_symbol: Symbol, 
-        amount: i128, 
-        recipient: Address, 
+        env: Env,
+        asset_symbol: Symbol,
+        amount: i128,
+        recipient: Address,
         proof: BytesN<32>,
-        signatures: Map<BytesN<32>, BytesN<64>>
+        signatures: Map<BytesN<32>, BytesN<64>>,
     ) -> Result<(), Error> {
         ensure_not_paused(&env)?;
         verify_quorum(&env, &proof, &signatures)?;
         mark_processed(&env, &proof)?;
 
-        let asset_address: Address = env.storage().instance()
+        let asset_address: Address = env
+            .storage()
+            .instance()
             .get(&DataKey::TokenMapping(asset_symbol.clone()))
             .ok_or(Error::TokenNotMapped)?;
 
         token::StellarAssetClient::new(&env, &asset_address).mint(&recipient, &amount);
 
-        env.events().publish(
-            (symbol_short!("mint"),),
-            (asset_symbol, recipient, amount, proof)
-        );
+        WrappedMinted {
+            asset_symbol,
+            recipient,
+            amount,
+            proof,
+        }
+        .publish(&env);
         Ok(())
     }
 
     pub fn burn_wrapped(
-        env: Env, 
+        env: Env,
         from: Address,
-        asset: Address, 
-        amount: i128, 
-        recipient_chain: Symbol, 
-        recipient: String
+        asset: Address,
+        amount: i128,
+        recipient_chain: Symbol,
+        recipient: String,
     ) -> Result<(), Error> {
         ensure_not_paused(&env)?;
         if amount <= 0 {
@@ -139,26 +194,32 @@ impl CrossChainBridge {
         }
         from.require_auth();
 
-        let _asset_symbol: Symbol = env.storage().instance()
+        let _asset_symbol: Symbol = env
+            .storage()
+            .instance()
             .get(&DataKey::WrappedTokenMapping(asset.clone()))
             .ok_or(Error::TokenNotMapped)?;
 
         token::StellarAssetClient::new(&env, &asset).burn(&from, &amount);
 
-        env.events().publish(
-            (symbol_short!("burn"),),
-            (asset, from, amount, recipient_chain, recipient)
-        );
+        WrappedBurned {
+            asset,
+            from,
+            amount,
+            recipient_chain,
+            recipient,
+        }
+        .publish(&env);
         Ok(())
     }
 
     pub fn release(
-        env: Env, 
-        asset: Address, 
-        amount: i128, 
-        recipient: Address, 
+        env: Env,
+        asset: Address,
+        amount: i128,
+        recipient: Address,
         proof: BytesN<32>,
-        signatures: Map<BytesN<32>, BytesN<64>>
+        signatures: Map<BytesN<32>, BytesN<64>>,
     ) -> Result<(), Error> {
         ensure_not_paused(&env)?;
         verify_quorum(&env, &proof, &signatures)?;
@@ -167,10 +228,13 @@ impl CrossChainBridge {
         let client = token::Client::new(&env, &asset);
         client.transfer(&env.current_contract_address(), &recipient, &amount);
 
-        env.events().publish(
-            (symbol_short!("release"),),
-            (asset, recipient, amount, proof)
-        );
+        TokenReleased {
+            asset,
+            recipient,
+            amount,
+            proof,
+        }
+        .publish(&env);
         Ok(())
     }
 }
@@ -186,18 +250,21 @@ fn ensure_not_paused(env: &Env) -> Result<(), Error> {
 }
 
 fn require_admin(env: &Env) -> Result<(), Error> {
-    let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
+    let admin: Address =
+        env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotAuthorized)?;
     admin.require_auth();
     Ok(())
 }
 
 fn verify_quorum(
-    env: &Env, 
-    proof: &BytesN<32>, 
-    signatures: &Map<BytesN<32>, BytesN<64>>
+    env: &Env,
+    proof: &BytesN<32>,
+    signatures: &Map<BytesN<32>, BytesN<64>>,
 ) -> Result<(), Error> {
-    let validators: Vec<BytesN<32>> = env.storage().instance().get(&DataKey::Validators).ok_or(Error::NotAuthorized)?;
-    let quorum: u32 = env.storage().instance().get(&DataKey::Quorum).ok_or(Error::NotAuthorized)?;
+    let validators: Vec<BytesN<32>> =
+        env.storage().instance().get(&DataKey::Validators).ok_or(Error::NotAuthorized)?;
+    let quorum: u32 =
+        env.storage().instance().get(&DataKey::Quorum).ok_or(Error::NotAuthorized)?;
 
     if signatures.len() < quorum {
         return Err(Error::InvalidQuorum);
@@ -208,11 +275,11 @@ fn verify_quorum(
         if !validators.contains(&pubkey) {
             continue;
         }
-        
+
         // Real Ed25519 signature verification
         // Host panics on failure with Crypto error
         env.crypto().ed25519_verify(&pubkey, proof.as_ref(), &sig);
-        
+
         valid_sigs += 1;
     }
 
@@ -235,6 +302,7 @@ fn mark_processed(env: &Env, proof: &BytesN<32>) -> Result<(), Error> {
 mod test {
     use super::*;
     use soroban_sdk::{
+        symbol_short,
         testutils::{Address as _},
         token::{StellarAssetClient, TokenClient},
         Address, Env, BytesN,
@@ -244,7 +312,7 @@ mod test {
 
     fn setup(env: &Env) -> (CrossChainBridgeClient<'_>, Address, Address, BytesN<32>, SigningKey) {
         let admin = Address::generate(env);
-        
+
         let mut csprng = OsRng;
         let signing_key: SigningKey = SigningKey::generate(&mut csprng);
         let verifying_key: VerifyingKey = VerifyingKey::from(&signing_key);
@@ -271,7 +339,7 @@ mod test {
         let token_sac = StellarAssetClient::new(&env, &token_addr);
 
         token_sac.mint(&user, &1000);
-        
+
         client.lock(&user, &token_addr, &600, &symbol_short!("SOL"), &String::from_str(&env, "0xabc"));
         assert_eq!(token_client.balance(&user), 400);
         assert_eq!(token_client.balance(&bridge_addr), 600);
@@ -283,7 +351,7 @@ mod test {
 
         let mut sigs = Map::new(&env);
         sigs.set(validator_pk, sig);
-        
+
         client.release(&token_addr, &300, &user, &proof, &sigs);
         assert_eq!(token_client.balance(&user), 700);
     }
@@ -297,12 +365,12 @@ mod test {
 
         let user = Address::generate(&env);
         let token_addr = env.register_stellar_asset_contract_v2(Address::generate(&env)).address();
-        
+
         let proof = BytesN::from_array(&env, &[1u8; 32]);
         let bad_sig = BytesN::from_array(&env, &[0u8; 64]);
         let mut sigs = Map::new(&env);
         sigs.set(validator_pk, bad_sig);
-        
+
         client.release(&token_addr, &100, &user, &proof, &sigs);
     }
 
@@ -315,7 +383,7 @@ mod test {
         let user = Address::generate(&env);
         let token_addr = env.register_stellar_asset_contract_v2(bridge_addr.clone()).address();
         let token_client = TokenClient::new(&env, &token_addr);
-        
+
         let eth_symbol = symbol_short!("ETH");
         client.set_token_mapping(&eth_symbol, &token_addr);
 

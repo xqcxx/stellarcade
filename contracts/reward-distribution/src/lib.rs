@@ -153,11 +153,7 @@ impl RewardDistribution {
             .instance()
             .set(&DataKey::BalanceContract, &balance_contract);
 
-        env.events().publish_event(&ContractInitialized {
-            admin,
-            treasury_contract,
-            balance_contract,
-        });
+        ContractInitialized { admin, treasury_contract, balance_contract }.publish(&env);
 
         Ok(())
     }
@@ -203,10 +199,7 @@ impl RewardDistribution {
             PERSISTENT_BUMP_LEDGERS,
         );
 
-        env.events().publish_event(&CampaignDefined {
-            campaign_id,
-            budget,
-        });
+        CampaignDefined { campaign_id, budget }.publish(&env);
 
         Ok(())
     }
@@ -283,12 +276,7 @@ impl RewardDistribution {
             PERSISTENT_BUMP_LEDGERS,
         );
 
-        env.events().publish_event(&RewardAccrued {
-            campaign_id,
-            user,
-            amount,
-            new_total: new_accrued,
-        });
+        RewardAccrued { campaign_id, user, amount, new_total: new_accrued }.publish(&env);
 
         Ok(())
     }
@@ -345,11 +333,7 @@ impl RewardDistribution {
         // Stored for composability — the balance_contract address is available
         // via `env.storage().instance().get(&DataKey::BalanceContract)`.
 
-        env.events().publish_event(&RewardClaimed {
-            campaign_id,
-            user,
-            amount: accrued,
-        });
+        RewardClaimed { campaign_id, user, amount: accrued }.publish(&env);
 
         Ok(accrued)
     }

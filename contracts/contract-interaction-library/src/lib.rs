@@ -15,7 +15,7 @@
 //!    call outcomes for auditability.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Map, String, Symbol,
+    contract, contractevent, contractimpl, contracttype, Address, Env, Map, String,
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -49,10 +49,31 @@ pub enum DataKey {
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
-const EVT_INIT: Symbol = symbol_short!("init");
-const EVT_REGISTER: Symbol = symbol_short!("register");
-const EVT_DEACTIVATE: Symbol = symbol_short!("deact");
-const EVT_LOGGED: Symbol = symbol_short!("logged");
+#[contractevent]
+pub struct LibraryInitialized {
+    pub admin: Address,
+}
+
+#[contractevent]
+pub struct ContractRegistered {
+    pub name: String,
+    pub address: Address,
+    pub version: u32,
+}
+
+#[contractevent]
+pub struct ContractDeactivated {
+    pub name: String,
+}
+
+#[contractevent]
+pub struct CallLogged {
+    #[topic]
+    pub log_id: u64,
+    pub callee_name: String,
+    pub caller: Address,
+    pub success: bool,
+}
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
@@ -73,7 +94,7 @@ impl ContractInteractionLibrary {
         let empty_log: Map<u64, CallRecord> = Map::new(&env);
         env.storage().instance().set(&DataKey::CallLog, &empty_log);
         env.storage().instance().set(&DataKey::CallCounter, &0u64);
-        env.events().publish((EVT_INIT,), (admin,));
+        LibraryInitialized { admin }.publish(&env);
     }
 
     // ── Registry ──────────────────────────────────────────────────────────────
@@ -100,7 +121,7 @@ impl ContractInteractionLibrary {
         };
         registry.set(name.clone(), entry);
         env.storage().instance().set(&DataKey::Registry, &registry);
-        env.events().publish((EVT_REGISTER,), (name, address, version));
+        ContractRegistered { name, address, version }.publish(&env);
     }
 
     /// Deactivate a registered contract by name.
@@ -112,7 +133,7 @@ impl ContractInteractionLibrary {
         entry.active = false;
         registry.set(name.clone(), entry);
         env.storage().instance().set(&DataKey::Registry, &registry);
-        env.events().publish((EVT_DEACTIVATE,), (name,));
+        ContractDeactivated { name }.publish(&env);
     }
 
     /// Upgrade a registered contract to a new address + version.
@@ -173,7 +194,13 @@ impl ContractInteractionLibrary {
         log.set(id, record);
         env.storage().instance().set(&DataKey::CallLog, &log);
         env.storage().instance().set(&DataKey::CallCounter, &(id + 1));
-        env.events().publish((EVT_LOGGED, id), (callee_name, caller, success));
+        CallLogged {
+            log_id: id,
+            callee_name,
+            caller,
+            success,
+        }
+        .publish(&env);
         id
     }
 

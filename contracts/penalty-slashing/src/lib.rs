@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
+    contract, contractevent, contractimpl, contracttype,
     token, Address, Env, Symbol,
 };
 
@@ -11,8 +11,8 @@ use soroban_sdk::{
 pub enum DataKey {
     Admin,
     Treasury,
-    Violation(Symbol),      // violation code → PenaltyRule
-    Penalty(u64),           // penalty_id → PenaltyRecord
+    Violation(Symbol),  // violation code → PenaltyRule
+    Penalty(u64),       // penalty_id → PenaltyRecord
     NextPenaltyId,
 }
 
@@ -45,25 +45,26 @@ pub struct PenaltyRecord {
 }
 
 // ── Events ────────────────────────────────────────────────────────
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct ViolationDefined {
+    #[topic]
     pub code: Symbol,
     pub slash_amount: i128,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct PenaltyApplied {
+    #[topic]
     pub penalty_id: u64,
+    #[topic]
     pub account: Address,
     pub code: Symbol,
     pub slash_amount: i128,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct PenaltyAppealed {
+    #[topic]
     pub penalty_id: u64,
     pub account: Address,
 }
@@ -94,10 +95,7 @@ impl PenaltySlashing {
         assert!(penalty_rule.slash_amount >= 0, "Slash amount must be non-negative");
         env.storage().persistent().set(&DataKey::Violation(code.clone()), &penalty_rule);
 
-        env.events().publish(
-            (symbol_short!("vdef"),),
-            ViolationDefined { code, slash_amount: penalty_rule.slash_amount },
-        );
+        ViolationDefined { code, slash_amount: penalty_rule.slash_amount }.publish(&env);
     }
 
     /// Apply a penalty to an account. Admin-only.
@@ -128,7 +126,8 @@ impl PenaltySlashing {
 
         // Transfer slash amount from account to treasury
         if rule.slash_amount > 0 {
-            let treasury: Address = env.storage().instance().get(&DataKey::Treasury).expect("Not initialized");
+            let treasury: Address =
+                env.storage().instance().get(&DataKey::Treasury).expect("Not initialized");
             let token_client = token::Client::new(&env, &token_address);
             token_client.transfer(&account, &treasury, &rule.slash_amount);
         }
@@ -143,10 +142,7 @@ impl PenaltySlashing {
         };
         env.storage().persistent().set(&DataKey::Penalty(penalty_id), &record);
 
-        env.events().publish(
-            (symbol_short!("applied"),),
-            PenaltyApplied { penalty_id, account, code, slash_amount: rule.slash_amount },
-        );
+        PenaltyApplied { penalty_id, account, code, slash_amount: rule.slash_amount }.publish(&env);
 
         penalty_id
     }
@@ -169,10 +165,7 @@ impl PenaltySlashing {
         record.status = PenaltyStatus::Appealed;
         env.storage().persistent().set(&DataKey::Penalty(penalty_id), &record);
 
-        env.events().publish(
-            (symbol_short!("appealed"),),
-            PenaltyAppealed { penalty_id, account: record.account },
-        );
+        PenaltyAppealed { penalty_id, account: record.account }.publish(&env);
     }
 
     /// Read current state of a penalty record.

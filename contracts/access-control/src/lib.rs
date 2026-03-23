@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol,
+    contract, contractevent, contractimpl, contracttype, Address, Env, Symbol,
 };
 
 #[contracttype]
@@ -11,39 +11,39 @@ pub enum DataKey {
     Role(Symbol, Address),
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+// Predefined roles as constants for reuse
+use soroban_sdk::symbol_short;
+pub const ADMIN: Symbol = symbol_short!("ADMIN");
+pub const OPERATOR: Symbol = symbol_short!("OPERATOR");
+pub const PAUSER: Symbol = symbol_short!("PAUSER");
+pub const GAME: Symbol = symbol_short!("GAME");
+
+// ── Events ────────────────────────────────────────────────────────
+#[contractevent]
 pub struct RoleGranted {
     pub role: Symbol,
     pub account: Address,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct RoleRevoked {
     pub role: Symbol,
     pub account: Address,
 }
-
-// Predefined roles as constants for reuse
-pub const ADMIN: Symbol = symbol_short!("ADMIN");
-pub const OPERATOR: Symbol = symbol_short!("OPERATOR");
-pub const PAUSER: Symbol = symbol_short!("PAUSER");
-pub const GAME: Symbol = symbol_short!("GAME");
 
 #[contract]
 pub struct AccessControl;
 
 #[contractimpl]
 impl AccessControl {
-    /// Initializes the contract with a super admin. 
+    /// Initializes the contract with a super admin.
     /// This admin will have the power to grant and revoke any roles.
     pub fn init(env: Env, admin: Address) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("Already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        
+
         // The admin also gets the ADMIN role by default for internal consistency
         internal_grant_role(&env, ADMIN, admin);
     }
@@ -72,7 +72,7 @@ impl AccessControl {
 }
 
 // --- Library Functions / Guard Helpers ---
-// These functions are designed to be used either matching the contract logic 
+// These functions are designed to be used either matching the contract logic
 // or as a shared module for other contracts.
 
 pub fn require_admin(env: &Env) {
@@ -93,9 +93,9 @@ pub fn internal_grant_role(env: &Env, role: Symbol, account: Address) {
     let key = DataKey::Role(role.clone(), account.clone());
     if !env.storage().persistent().has(&key) {
         env.storage().persistent().set(&key, &());
-        
+
         // Emit role change event
-        env.events().publish((), RoleGranted { role, account });
+        RoleGranted { role, account }.publish(env);
     }
 }
 
@@ -103,9 +103,9 @@ pub fn internal_revoke_role(env: &Env, role: Symbol, account: Address) {
     let key = DataKey::Role(role.clone(), account.clone());
     if env.storage().persistent().has(&key) {
         env.storage().persistent().remove(&key);
-        
+
         // Emit role change event
-        env.events().publish((), RoleRevoked { role, account });
+        RoleRevoked { role, account }.publish(env);
     }
 }
 

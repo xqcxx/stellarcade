@@ -6,8 +6,7 @@
 //! schedule. Rewards may be revoked by the admin before full vesting.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, Map, String, Symbol,
-    Vec,
+    contract, contractevent, contractimpl, contracttype, token, Address, Env, Map, Vec,
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -37,10 +36,31 @@ pub enum DataKey {
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
-const EVT_INIT: Symbol = symbol_short!("init");
-const EVT_SCHEDULED: Symbol = symbol_short!("scheduled");
-const EVT_CLAIMED: Symbol = symbol_short!("claimed");
-const EVT_REVOKED: Symbol = symbol_short!("revoked");
+#[contractevent]
+pub struct VestingInitialized {
+    pub admin: Address,
+    pub token_address: Address,
+}
+
+#[contractevent]
+pub struct VestingScheduled {
+    pub user: Address,
+    pub schedule_id: u64,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct VestingClaimed {
+    pub user: Address,
+    pub total_claim: i128,
+}
+
+#[contractevent]
+pub struct VestingRevoked {
+    pub schedule_id: u64,
+    pub user: Address,
+    pub unvested: i128,
+}
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
@@ -60,7 +80,7 @@ impl RewardVestingContract {
         env.storage().instance().set(&DataKey::NextScheduleId, &0u64);
         let empty: Map<u64, VestingSchedule> = Map::new(&env);
         env.storage().instance().set(&DataKey::ScheduleMap, &empty);
-        env.events().publish((EVT_INIT,), (admin, token_address));
+        VestingInitialized { admin, token_address }.publish(&env);
     }
 
     /// Create a new vesting schedule for `user`.
@@ -134,8 +154,7 @@ impl RewardVestingContract {
         ids.push_back(schedule_id);
         env.storage().persistent().set(&user_key, &ids);
 
-        env.events()
-            .publish((EVT_SCHEDULED,), (user, schedule_id, amount));
+        VestingScheduled { user, schedule_id, amount }.publish(&env);
         schedule_id
     }
 
@@ -186,7 +205,7 @@ impl RewardVestingContract {
 
         env.storage().instance().set(&DataKey::ScheduleMap, &map);
         token.transfer(&env.current_contract_address(), &user, &total_claim);
-        env.events().publish((EVT_CLAIMED,), (user, total_claim));
+        VestingClaimed { user, total_claim }.publish(&env);
         total_claim
     }
 
@@ -225,8 +244,7 @@ impl RewardVestingContract {
             token.transfer(&env.current_contract_address(), &admin, &unvested);
         }
 
-        env.events()
-            .publish((EVT_REVOKED,), (schedule_id, user, unvested));
+        VestingRevoked { schedule_id, user, unvested }.publish(&env);
         unvested
     }
 

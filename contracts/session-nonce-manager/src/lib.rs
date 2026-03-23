@@ -8,7 +8,7 @@
 //! revoked before use.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, String, Symbol,
+    contract, contractevent, contractimpl, contracttype, Address, Env, String,
 };
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
@@ -24,10 +24,30 @@ pub enum DataKey {
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
-const EVT_INIT: Symbol = symbol_short!("init");
-const EVT_ISSUED: Symbol = symbol_short!("issued");
-const EVT_CONSUMED: Symbol = symbol_short!("consumed");
-const EVT_REVOKED: Symbol = symbol_short!("revoked");
+#[contractevent]
+pub struct NonceManagerInitialized {
+    pub admin: Address,
+}
+
+#[contractevent]
+pub struct NonceIssued {
+    pub account: Address,
+    pub purpose: String,
+    pub nonce: u64,
+}
+
+#[contractevent]
+pub struct NonceConsumed {
+    pub account: Address,
+    pub purpose: String,
+    pub nonce: u64,
+}
+
+#[contractevent]
+pub struct NonceRevoked {
+    pub account: Address,
+    pub nonce: u64,
+}
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
@@ -43,7 +63,7 @@ impl SessionNonceManagerContract {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.events().publish((EVT_INIT,), (admin,));
+        NonceManagerInitialized { admin }.publish(&env);
     }
 
     /// Issue the next nonce for `(account, purpose)` and return its value.
@@ -55,7 +75,7 @@ impl SessionNonceManagerContract {
         let key = DataKey::NextNonce(account.clone(), purpose.clone());
         let nonce: u64 = env.storage().persistent().get(&key).unwrap_or(0);
         env.storage().persistent().set(&key, &(nonce + 1));
-        env.events().publish((EVT_ISSUED,), (account, purpose, nonce));
+        NonceIssued { account, purpose, nonce }.publish(&env);
         nonce
     }
 
@@ -80,7 +100,7 @@ impl SessionNonceManagerContract {
             panic!("Nonce not found");
         }
         env.storage().persistent().set(&used_key, &true);
-        env.events().publish((EVT_CONSUMED,), (account, purpose, nonce));
+        NonceConsumed { account, purpose, nonce }.publish(&env);
     }
 
     /// Return `true` if `nonce` for `(account, purpose)` is valid.
@@ -108,7 +128,7 @@ impl SessionNonceManagerContract {
         Self::require_admin(&env);
         let key = DataKey::NonceRevoked(account.clone(), nonce);
         env.storage().persistent().set(&key, &true);
-        env.events().publish((EVT_REVOKED,), (account, nonce));
+        NonceRevoked { account, nonce }.publish(&env);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -135,7 +155,7 @@ impl SessionNonceManagerContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Events as _}, Env};
+    use soroban_sdk::{testutils::{Address as _}, Env};
 
     fn setup() -> (Env, SessionNonceManagerContractClient<'static>, Address) {
         let env = Env::default();

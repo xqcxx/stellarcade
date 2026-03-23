@@ -183,7 +183,7 @@ impl Staking {
         env.storage().persistent().set(&DataKey::Position(user.clone()), &position);
         env.storage().instance().set(&DataKey::GlobalState, &state);
 
-        env.events().publish_event(&Staked { user: user.clone(), amount });
+        Staked { user: user.clone(), amount }.publish(&env);
 
         Ok(())
     }
@@ -227,7 +227,7 @@ impl Staking {
         env.storage().persistent().set(&DataKey::Position(user.clone()), &position);
         env.storage().instance().set(&DataKey::GlobalState, &state);
 
-        env.events().publish_event(&Unstaked { user: user.clone(), amount });
+        Unstaked { user: user.clone(), amount }.publish(&env);
 
         Ok(())
     }
@@ -263,7 +263,7 @@ impl Staking {
 
         env.storage().persistent().set(&DataKey::Position(user.clone()), &position);
 
-        env.events().publish_event(&RewardsClaimed { user: user.clone(), amount: total_claimable });
+        RewardsClaimed { user: user.clone(), amount: total_claimable }.publish(&env);
 
         Ok(total_claimable)
     }

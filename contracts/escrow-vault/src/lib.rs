@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
+    contract, contractevent, contractimpl, contracttype,
     token, Address, Env, Symbol,
 };
 
@@ -11,7 +11,7 @@ use soroban_sdk::{
 pub enum DataKey {
     Admin,
     Token,
-    Escrow(u64),         // escrow_id → EscrowState
+    Escrow(u64), // escrow_id → EscrowState
     NextId,
 }
 
@@ -36,9 +36,9 @@ pub struct EscrowState {
 }
 
 // ── Events ────────────────────────────────────────────────────────
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct EscrowCreated {
+    #[topic]
     pub escrow_id: u64,
     pub payer: Address,
     pub payee: Address,
@@ -46,17 +46,17 @@ pub struct EscrowCreated {
     pub terms_hash: Symbol,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct EscrowReleased {
+    #[topic]
     pub escrow_id: u64,
     pub payee: Address,
     pub amount: i128,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct EscrowCancelled {
+    #[topic]
     pub escrow_id: u64,
     pub payer: Address,
     pub amount: i128,
@@ -90,7 +90,8 @@ impl EscrowVault {
         payer.require_auth();
 
         // Transfer tokens from payer to this contract
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).expect("Not initialized");
+        let token_addr: Address =
+            env.storage().instance().get(&DataKey::Token).expect("Not initialized");
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&payer, &env.current_contract_address(), &amount);
 
@@ -114,10 +115,7 @@ impl EscrowVault {
         };
         env.storage().persistent().set(&DataKey::Escrow(escrow_id), &state);
 
-        env.events().publish(
-            (symbol_short!("created"),),
-            EscrowCreated { escrow_id, payer, payee, amount, terms_hash },
-        );
+        EscrowCreated { escrow_id, payer, payee, amount, terms_hash }.publish(&env);
 
         escrow_id
     }
@@ -137,7 +135,8 @@ impl EscrowVault {
             "Escrow is not active"
         );
 
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
+        let admin: Address =
+            env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
         assert!(
             caller == admin || caller == state.payer,
             "Unauthorized: must be admin or payer"
@@ -147,7 +146,8 @@ impl EscrowVault {
         env.storage().persistent().set(&DataKey::Escrow(escrow_id), &state);
 
         // Transfer to payee
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).expect("Not initialized");
+        let token_addr: Address =
+            env.storage().instance().get(&DataKey::Token).expect("Not initialized");
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(
             &env.current_contract_address(),
@@ -155,15 +155,13 @@ impl EscrowVault {
             &state.amount,
         );
 
-        env.events().publish(
-            (symbol_short!("released"),),
-            EscrowReleased { escrow_id, payee: state.payee, amount: state.amount },
-        );
+        EscrowReleased { escrow_id, payee: state.payee, amount: state.amount }.publish(&env);
     }
 
     /// Cancel an active escrow and return funds to the payer. Admin-only.
     pub fn cancel_escrow(env: Env, escrow_id: u64) {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
+        let admin: Address =
+            env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
         admin.require_auth();
 
         let mut state: EscrowState = env
@@ -180,7 +178,8 @@ impl EscrowVault {
         state.status = EscrowStatus::Cancelled;
         env.storage().persistent().set(&DataKey::Escrow(escrow_id), &state);
 
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).expect("Not initialized");
+        let token_addr: Address =
+            env.storage().instance().get(&DataKey::Token).expect("Not initialized");
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(
             &env.current_contract_address(),
@@ -188,10 +187,7 @@ impl EscrowVault {
             &state.amount,
         );
 
-        env.events().publish(
-            (symbol_short!("cancel"),),
-            EscrowCancelled { escrow_id, payer: state.payer, amount: state.amount },
-        );
+        EscrowCancelled { escrow_id, payer: state.payer, amount: state.amount }.publish(&env);
     }
 
     /// Read the state of an escrow.
@@ -208,7 +204,8 @@ impl EscrowVault {
 mod test {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+        symbol_short,
+        testutils::{Address as _},
         token::{Client as TokenClient, StellarAssetClient},
         Env,
     };

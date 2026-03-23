@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
+    contract, contractevent, contractimpl, contracttype,
     Address, Env, Symbol, Vec,
 };
 
@@ -10,9 +10,9 @@ use soroban_sdk::{
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
-    QueueState(Symbol),     // queue_id → MatchQueueState
+    QueueState(Symbol),  // queue_id → MatchQueueState
     NextMatchId,
-    Match(u64),             // match_id → MatchRecord
+    Match(u64),          // match_id → MatchRecord
 }
 
 // ── Domain Types ─────────────────────────────────────────────────
@@ -33,23 +33,23 @@ pub struct MatchRecord {
 }
 
 // ── Events ────────────────────────────────────────────────────────
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct PlayerEnqueued {
+    #[topic]
     pub queue_id: Symbol,
     pub player: Address,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct PlayerDequeued {
+    #[topic]
     pub queue_id: Symbol,
     pub player: Address,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct MatchCreated {
+    #[topic]
     pub match_id: u64,
     pub queue_id: Symbol,
 }
@@ -98,16 +98,14 @@ impl MatchmakingQueue {
         state.players.push_back(player.clone());
         env.storage().persistent().set(&DataKey::QueueState(queue_id.clone()), &state);
 
-        env.events().publish(
-            (symbol_short!("enqueued"),),
-            PlayerEnqueued { queue_id, player },
-        );
+        PlayerEnqueued { queue_id, player }.publish(&env);
     }
 
     /// Remove a player from a queue. Only admin or the player themselves can dequeue.
     pub fn dequeue_player(env: Env, caller: Address, queue_id: Symbol, player: Address) {
         caller.require_auth();
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
+        let admin: Address =
+            env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
         assert!(caller == admin || caller == player, "Unauthorized");
 
         let mut state: MatchQueueState = env
@@ -130,16 +128,14 @@ impl MatchmakingQueue {
         state.players = new_players;
         env.storage().persistent().set(&DataKey::QueueState(queue_id.clone()), &state);
 
-        env.events().publish(
-            (symbol_short!("dequeued"),),
-            PlayerDequeued { queue_id, player },
-        );
+        PlayerDequeued { queue_id, player }.publish(&env);
     }
 
     /// Create a match from a set of players. Admin-only.
     /// Players are removed from the queue on match creation.
     pub fn create_match(env: Env, queue_id: Symbol, players: Vec<Address>) -> u64 {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
+        let admin: Address =
+            env.storage().instance().get(&DataKey::Admin).expect("Not initialized");
         admin.require_auth();
 
         assert!(!players.is_empty(), "Players list cannot be empty");
@@ -184,10 +180,7 @@ impl MatchmakingQueue {
         };
         env.storage().persistent().set(&DataKey::Match(match_id), &record);
 
-        env.events().publish(
-            (symbol_short!("matched"),),
-            MatchCreated { match_id, queue_id },
-        );
+        MatchCreated { match_id, queue_id }.publish(&env);
 
         match_id
     }

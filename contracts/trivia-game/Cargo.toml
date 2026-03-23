@@ -1,5 +1,5 @@
 [package]
-name = "stellarcade-higher-lower"
+name = "stellarcade-trivia-game"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -12,4 +12,3 @@ soroban-sdk = { version = "25.0.2", features = ["testutils"] }
 
 [lib]
 crate-type = ["cdylib"]
-

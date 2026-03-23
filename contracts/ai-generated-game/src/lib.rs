@@ -1,6 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String,
+    contract, contracterror, contractevent, contractimpl, contracttype, Address, BytesN, Env,
+    String,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -45,6 +46,48 @@ pub enum Error {
     NoReward = 8,
 }
 
+// ── Events ────────────────────────────────────────────────────────
+#[contractevent]
+pub struct ContractInitialized {
+    pub admin: Address,
+    pub model_oracle: Address,
+    pub reward_contract: Address,
+}
+
+#[contractevent]
+pub struct GameCreated {
+    #[topic]
+    pub game_id: u64,
+    pub config_hash: BytesN<32>,
+}
+
+#[contractevent]
+pub struct MovePlayed {
+    #[topic]
+    pub game_id: u64,
+    #[topic]
+    pub player: Address,
+    pub move_payload: String,
+}
+
+#[contractevent]
+pub struct GameResolved {
+    #[topic]
+    pub game_id: u64,
+    #[topic]
+    pub oracle: Address,
+    pub result_payload: String,
+    pub winner: Option<Address>,
+}
+
+#[contractevent]
+pub struct RewardClaimed {
+    #[topic]
+    pub game_id: u64,
+    #[topic]
+    pub player: Address,
+}
+
 #[contract]
 pub struct AIGeneratedGameContract;
 
@@ -60,12 +103,17 @@ impl AIGeneratedGameContract {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
         }
-        
+
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::ModelOracle, &model_oracle);
         env.storage().instance().set(&DataKey::RewardContract, &reward_contract);
-        
-        env.events().publish((symbol_short!("init"),), (admin.clone(), model_oracle, reward_contract));
+
+        ContractInitialized {
+            admin: admin.clone(),
+            model_oracle,
+            reward_contract,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -77,25 +125,26 @@ impl AIGeneratedGameContract {
         config_hash: BytesN<32>,
     ) -> Result<(), Error> {
         admin.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        
+        let stored_admin: Address =
+            env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+
         if admin != stored_admin {
             return Err(Error::Unauthorized);
         }
-        
+
         let game_key = DataKey::Game(game_id);
         if env.storage().persistent().has(&game_key) {
             return Err(Error::GameAlreadyExists);
         }
-        
+
         let state = AIGameState {
             config_hash: config_hash.clone(),
             status: GameStatus::Created,
             winner: None,
         };
-        
+
         env.storage().persistent().set(&game_key, &state);
-        env.events().publish((symbol_short!("created"), game_id), config_hash);
+        GameCreated { game_id, config_hash }.publish(&env);
         Ok(())
     }
 
@@ -107,18 +156,24 @@ impl AIGeneratedGameContract {
         move_payload: String,
     ) -> Result<(), Error> {
         player.require_auth();
-        
+
         let game_key = DataKey::Game(game_id);
-        let mut state: AIGameState = env.storage().persistent().get(&game_key).ok_or(Error::GameNotFound)?;
-        
+        let mut state: AIGameState =
+            env.storage().persistent().get(&game_key).ok_or(Error::GameNotFound)?;
+
         if state.status == GameStatus::Created {
             state.status = GameStatus::InProgress;
             env.storage().persistent().set(&game_key, &state);
         } else if state.status != GameStatus::InProgress {
             return Err(Error::InvalidStatus);
         }
-        
-        env.events().publish((symbol_short!("move"), game_id, player), move_payload);
+
+        MovePlayed {
+            game_id,
+            player,
+            move_payload,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -131,64 +186,76 @@ impl AIGeneratedGameContract {
         winner: Option<Address>,
     ) -> Result<(), Error> {
         oracle.require_auth();
-        let stored_oracle: Address = env.storage().instance().get(&DataKey::ModelOracle).ok_or(Error::NotInitialized)?;
-        
+        let stored_oracle: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ModelOracle)
+            .ok_or(Error::NotInitialized)?;
+
         if oracle != stored_oracle {
             return Err(Error::Unauthorized);
         }
-        
+
         let game_key = DataKey::Game(game_id);
-        let mut state: AIGameState = env.storage().persistent().get(&game_key).ok_or(Error::GameNotFound)?;
-        
+        let mut state: AIGameState =
+            env.storage().persistent().get(&game_key).ok_or(Error::GameNotFound)?;
+
         if state.status == GameStatus::Resolved {
             return Err(Error::InvalidStatus);
         }
-        
+
         state.status = GameStatus::Resolved;
         state.winner = winner.clone();
-        
+
         env.storage().persistent().set(&game_key, &state);
-        
+
         if let Some(w) = winner.clone() {
             env.storage().persistent().set(&DataKey::Reward(game_id, w.clone()), &true);
         }
-        
-        env.events().publish((symbol_short!("resolved"), game_id, oracle), (result_payload, winner));
+
+        GameResolved {
+            game_id,
+            oracle: oracle.clone(),
+            result_payload,
+            winner,
+        }
+        .publish(&env);
         Ok(())
     }
 
     /// Authorizes player to claim rewards mapped after oracle validation finishes.
-    pub fn claim_ai_reward(
-        env: Env,
-        player: Address,
-        game_id: u64,
-    ) -> Result<(), Error> {
+    pub fn claim_ai_reward(env: Env, player: Address, game_id: u64) -> Result<(), Error> {
         player.require_auth();
-        
+
         let game_key = DataKey::Game(game_id);
-        let state: AIGameState = env.storage().persistent().get(&game_key).ok_or(Error::GameNotFound)?;
-        
+        let state: AIGameState =
+            env.storage().persistent().get(&game_key).ok_or(Error::GameNotFound)?;
+
         if state.status != GameStatus::Resolved {
             return Err(Error::InvalidStatus);
         }
-        
+
         let reward_key = DataKey::Reward(game_id, player.clone());
         let can_claim_opt: Option<bool> = env.storage().persistent().get(&reward_key);
-        
+
         if can_claim_opt.is_none() {
-             return Err(Error::NoReward);
+            return Err(Error::NoReward);
         }
-        
+
         let can_claim = can_claim_opt.unwrap();
         if !can_claim {
             return Err(Error::RewardAlreadyClaimed);
         }
-        
+
         env.storage().persistent().set(&reward_key, &false);
-        
+
         // Ensure reward tracking was allocated correctly globally securely via event binding
-        env.events().publish((symbol_short!("claimed"), game_id, player.clone()), ());
-        
+        RewardClaimed {
+            game_id,
+            player: player.clone(),
+        }
+        .publish(&env);
+
         Ok(())
     }
 }
@@ -218,7 +285,7 @@ mod test {
     fn test_game_flow() {
         let env = Env::default();
         env.mock_all_auths();
-        
+
         let contract_id = env.register(AIGeneratedGameContract, ());
         let client = AIGeneratedGameContractClient::new(&env, &contract_id);
 
@@ -231,9 +298,9 @@ mod test {
 
         let game_id: u64 = 1;
         let config_hash = BytesN::from_array(&env, &[0; 32]);
-        
+
         client.create_ai_game(&admin, &game_id, &config_hash);
-        
+
         // Assert dup creation rejection natively
         let dup_create = client.try_create_ai_game(&admin, &game_id, &config_hash);
         assert_eq!(dup_create, Err(Ok(Error::GameAlreadyExists)));

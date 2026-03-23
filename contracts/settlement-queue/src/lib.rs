@@ -131,11 +131,7 @@ impl SettlementQueue {
         env.storage().instance().set(&DataKey::QueueHead, &0u64);
         env.storage().instance().set(&DataKey::QueueTail, &0u64);
 
-        env.events().publish_event(&ContractInitialized {
-            admin,
-            reward_contract,
-            treasury_contract,
-        });
+        ContractInitialized { admin, reward_contract, treasury_contract }.publish(&env);
 
         Ok(())
     }
@@ -185,11 +181,7 @@ impl SettlementQueue {
         tail = tail.checked_add(1).ok_or(Error::Overflow)?;
         env.storage().instance().set(&DataKey::QueueTail, &tail);
 
-        env.events().publish_event(&SettlementEnqueued {
-            settlement_id,
-            account,
-            amount,
-        });
+        SettlementEnqueued { settlement_id, account, amount }.publish(&env);
 
         Ok(())
     }
@@ -221,10 +213,7 @@ impl SettlementQueue {
                 settlement.status = SettlementStatus::Processed;
                 env.storage().persistent().set(&settlement_key, &settlement);
                 
-                env.events().publish_event(&SettlementProcessed {
-                    settlement_id: settlement_id.clone(),
-                    status: SettlementStatus::Processed,
-                });
+                SettlementProcessed { settlement_id: settlement_id.clone(), status: SettlementStatus::Processed }.publish(&env);
             }
 
             // Head always increments, effectively "popping" the queue even if status was already changed
@@ -261,10 +250,7 @@ impl SettlementQueue {
 
         env.storage().persistent().set(&settlement_key, &settlement);
 
-        env.events().publish_event(&SettlementFailed {
-            settlement_id,
-            error_code,
-        });
+        SettlementFailed { settlement_id, error_code }.publish(&env);
 
         Ok(())
     }

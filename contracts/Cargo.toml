@@ -1,0 +1,77 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "access-control",
+    "achievement-badge",
+    "ai-generated-game",
+    "balance-management",
+    "coin-flip",
+    "color-prediction",
+    "comprehensive-test-suite",
+    "contract-address-registry",
+    "contract-circuit-breaker",
+    "contract-doc-generator",
+    "contract-health-registry",
+    "contract-interaction-library",
+    "contract-metadata-registry",
+    "contract-monitoring",
+    "contract-role-registry",
+    "contract-upgrade-timelock",
+    "cross-chain-bridge",
+    "cross-contract-call-guard",
+    "cross-contract-handler",
+    "daily-reward-emission",
+    "daily-trivia",
+    "deployment-scripts",
+    "dice-roll",
+    "dynamic-fee-policy",
+    "emergency-pause",
+    "epoch-scheduler",
+    "escrow-vault",
+    "exploit-prevention",
+    "fee-management",
+    "gas-optimization-analysis",
+    "governance",
+    "governance-token",
+    "leaderboard",
+    "matchmaking-queue",
+    "multiplayer-room",
+    "nft-reward",
+    "number-guess",
+    "oracle-integration",
+    "pattern-puzzle",
+    "penalty-slashing",
+    "price-prediction",
+    "prize-pool",
+    "random-generator",
+    "referral-system",
+    "revenue-split",
+    "reward-distribution",
+    "reward-vesting",
+    "session-nonce-manager",
+    "settlement-queue",
+    "shared",
+    "speed-trivia",
+    "staking",
+    "streak-bonus",
+    "tournament-system",
+    "treasury",
+    "treasury-allocation",
+    "trivia-game",
+    "upgrade-mechanism",
+    "vip-subscription",
+    "wordle-clone",
+]
+
+exclude = [
+    "higher-lower",
+]
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = false
+panic = "abort"
+lto = true
+codegen-units = 1

@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
+    contract, contractevent, contractimpl, contracttype,
     Address, Env, Symbol,
 };
 
@@ -36,22 +36,19 @@ pub struct UpgradeRecord {
 }
 
 // ── Events ────────────────────────────────────────────────────────
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct UpgradeQueued {
     pub upgrade_id: u64,
     pub target_contract: Address,
     pub eta: u64,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct UpgradeCancelled {
     pub upgrade_id: u64,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct UpgradeExecuted {
     pub upgrade_id: u64,
     pub target_contract: Address,
@@ -113,10 +110,7 @@ impl ContractUpgradeTimelock {
         };
         env.storage().persistent().set(&DataKey::Upgrade(upgrade_id), &record);
 
-        env.events().publish(
-            (symbol_short!("queued"),),
-            UpgradeQueued { upgrade_id, target_contract, eta },
-        );
+        UpgradeQueued { upgrade_id, target_contract, eta }.publish(&env);
 
         upgrade_id
     }
@@ -139,10 +133,7 @@ impl ContractUpgradeTimelock {
         record.status = UpgradeStatus::Cancelled;
         env.storage().persistent().set(&DataKey::Upgrade(upgrade_id), &record);
 
-        env.events().publish(
-            (symbol_short!("cancel"),),
-            UpgradeCancelled { upgrade_id },
-        );
+        UpgradeCancelled { upgrade_id }.publish(&env);
     }
 
     /// Execute a queued upgrade after the timelock has elapsed. Admin-only.
@@ -166,10 +157,7 @@ impl ContractUpgradeTimelock {
         record.status = UpgradeStatus::Executed;
         env.storage().persistent().set(&DataKey::Upgrade(upgrade_id), &record);
 
-        env.events().publish(
-            (symbol_short!("executed"),),
-            UpgradeExecuted { upgrade_id, target_contract: record.target_contract },
-        );
+        UpgradeExecuted { upgrade_id, target_contract: record.target_contract }.publish(&env);
     }
 
     /// Read the state of an upgrade record.

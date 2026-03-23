@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
+    contract, contractevent, contractimpl, contracttype,
     token, Address, Env, Symbol, Vec,
 };
 
@@ -11,9 +11,9 @@ use soroban_sdk::{
 pub enum DataKey {
     Admin,
     Token,
-    SplitConfig(Symbol),    // stream_id → SplitConfig
-    StreamBalance(Symbol),  // stream_id → i128 (total deposited, not yet distributed)
-    RecipientBalance(Symbol, Address), // (stream_id, recipient) → i128
+    SplitConfig(Symbol),                   // stream_id → SplitConfig
+    StreamBalance(Symbol),                  // stream_id → i128 (total deposited, not yet distributed)
+    RecipientBalance(Symbol, Address),      // (stream_id, recipient) → i128
 }
 
 // ── Domain Types ─────────────────────────────────────────────────
@@ -33,22 +33,22 @@ pub struct SplitConfig {
 }
 
 // ── Events ────────────────────────────────────────────────────────
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct SplitConfigured {
+    #[topic]
     pub stream_id: Symbol,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct RevenueDeposited {
+    #[topic]
     pub stream_id: Symbol,
     pub amount: i128,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct RevenueDistributed {
+    #[topic]
     pub stream_id: Symbol,
     pub total: i128,
 }
@@ -88,10 +88,7 @@ impl RevenueSplit {
         };
         env.storage().persistent().set(&DataKey::SplitConfig(stream_id.clone()), &config);
 
-        env.events().publish(
-            (symbol_short!("scfg"),),
-            SplitConfigured { stream_id },
-        );
+        SplitConfigured { stream_id }.publish(&env);
     }
 
     /// Deposit revenue into a stream. Any caller may deposit; they must auth.
@@ -105,7 +102,8 @@ impl RevenueSplit {
             "Split config not found for stream"
         );
 
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).expect("Not initialized");
+        let token_addr: Address =
+            env.storage().instance().get(&DataKey::Token).expect("Not initialized");
         let token_client = token::Client::new(&env, &token_addr);
         token_client.transfer(&depositor, &env.current_contract_address(), &amount);
 
@@ -118,10 +116,7 @@ impl RevenueSplit {
             .persistent()
             .set(&DataKey::StreamBalance(stream_id.clone()), &(current.checked_add(amount).expect("Overflow")));
 
-        env.events().publish(
-            (symbol_short!("deposit"),),
-            RevenueDeposited { stream_id, amount },
-        );
+        RevenueDeposited { stream_id, amount }.publish(&env);
     }
 
     /// Distribute all pending revenue in a stream to recipients. Admin-only.
@@ -147,7 +142,8 @@ impl RevenueSplit {
             .persistent()
             .set(&DataKey::StreamBalance(stream_id.clone()), &0i128);
 
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).expect("Not initialized");
+        let token_addr: Address =
+            env.storage().instance().get(&DataKey::Token).expect("Not initialized");
         let token_client = token::Client::new(&env, &token_addr);
 
         for r in config.recipients.iter() {
@@ -170,10 +166,7 @@ impl RevenueSplit {
             }
         }
 
-        env.events().publish(
-            (symbol_short!("distrib"),),
-            RevenueDistributed { stream_id, total },
-        );
+        RevenueDistributed { stream_id, total }.publish(&env);
     }
 
     /// Query cumulative amount distributed to a recipient for a stream.

@@ -157,11 +157,7 @@ impl NftReward {
             PERSISTENT_BUMP_LEDGERS,
         );
 
-        env.events().publish_event(&CampaignDefined {
-            campaign_id,
-            metadata_uri,
-            supply,
-        });
+        CampaignDefined { campaign_id, metadata_uri, supply }.publish(&env);
 
         Ok(())
     }
@@ -212,10 +208,7 @@ impl NftReward {
             PERSISTENT_BUMP_LEDGERS,
         );
 
-        env.events().publish_event(&RewardMinted {
-            campaign_id,
-            user,
-        });
+        RewardMinted { campaign_id, user }.publish(&env);
 
         Ok(())
     }
@@ -246,10 +239,7 @@ impl NftReward {
         // Remove pending
         env.storage().persistent().remove(&pending_key);
 
-        env.events().publish_event(&RewardClaimed {
-            campaign_id,
-            user,
-        });
+        RewardClaimed { campaign_id, user }.publish(&env);
 
         Ok(())
     }

@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short,
+    contract, contractevent, contractimpl, contracttype,
     token, Address, Env, Symbol,
 };
 
@@ -11,8 +11,8 @@ use soroban_sdk::{
 pub enum DataKey {
     Admin,
     RewardPool,
-    Schedule(Symbol),           // schedule_id → EmissionConfig
-    EpochState(Symbol),         // schedule_id → EpochState
+    Schedule(Symbol),              // schedule_id → EmissionConfig
+    EpochState(Symbol),            // schedule_id → EpochState
     Claimed(Symbol, u64, Address), // (schedule_id, epoch_id, user)
 }
 
@@ -39,24 +39,24 @@ pub struct EmissionEpochState {
 }
 
 // ── Events ────────────────────────────────────────────────────────
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct EmissionConfigured {
+    #[topic]
     pub schedule_id: Symbol,
     pub rewards_per_epoch: i128,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct EpochEmitted {
+    #[topic]
     pub schedule_id: Symbol,
     pub epoch_id: u64,
     pub amount: i128,
 }
 
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[contractevent]
 pub struct RewardClaimed {
+    #[topic]
     pub schedule_id: Symbol,
     pub epoch_id: u64,
     pub user: Address,
@@ -95,13 +95,11 @@ impl DailyRewardEmission {
             .persistent()
             .set(&DataKey::EpochState(schedule_id.clone()), &epoch_state);
 
-        env.events().publish(
-            (symbol_short!("ecfg"),),
-            EmissionConfigured {
-                schedule_id,
-                rewards_per_epoch: config.rewards_per_epoch,
-            },
-        );
+        EmissionConfigured {
+            schedule_id,
+            rewards_per_epoch: config.rewards_per_epoch,
+        }
+        .publish(&env);
     }
 
     /// Finalize the current epoch and advance to the next. Admin-only.
@@ -138,7 +136,8 @@ impl DailyRewardEmission {
             .expect("Overflow");
 
         // Pull rewards from pool into this contract
-        let pool: Address = env.storage().instance().get(&DataKey::RewardPool).expect("Not initialized");
+        let pool: Address =
+            env.storage().instance().get(&DataKey::RewardPool).expect("Not initialized");
         let token_client = token::Client::new(&env, &config.token);
         token_client.transfer(&pool, &env.current_contract_address(), &config.rewards_per_epoch);
 
@@ -147,10 +146,7 @@ impl DailyRewardEmission {
             .set(&DataKey::EpochState(schedule_id.clone()), &epoch_state);
 
         let epoch_id = epoch_state.current_epoch;
-        env.events().publish(
-            (symbol_short!("emitted"),),
-            EpochEmitted { schedule_id, epoch_id, amount: config.rewards_per_epoch },
-        );
+        EpochEmitted { schedule_id, epoch_id, amount: config.rewards_per_epoch }.publish(&env);
 
         epoch_id
     }
@@ -185,10 +181,7 @@ impl DailyRewardEmission {
         let token_client = token::Client::new(&env, &config.token);
         token_client.transfer(&env.current_contract_address(), &user, &reward_amount);
 
-        env.events().publish(
-            (symbol_short!("claimed"),),
-            RewardClaimed { schedule_id, epoch_id, user, amount: reward_amount },
-        );
+        RewardClaimed { schedule_id, epoch_id, user, amount: reward_amount }.publish(&env);
     }
 
     /// Read the current emission state for a schedule.
