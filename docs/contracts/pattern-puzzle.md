@@ -60,3 +60,10 @@ Returns `true` if the player has already claimed their reward for a round.
 pub fn has_claimed(env: Env, round_id: u32, player: Address) -> bool
 ```
 
+### `get_leaderboard`
+Returns a leaderboard snapshot (addresses of players) for a given round. Supports an optional limit for pagination or "top N" views. Stable ordering is guaranteed by the underlying Vec storage.
+
+```rust
+pub fn get_leaderboard(env: Env, round_id: u32, limit: Option<u32>) -> Vec<Address>
+```
+

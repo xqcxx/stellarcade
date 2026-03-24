@@ -540,6 +540,26 @@ impl PatternPuzzle {
             .get(&DataKey::Claimed(round_id, player))
             .unwrap_or(false)
     }
+
+    /// Returns a leaderboard snapshot (addresses of players) for a given round.
+    /// Supports an optional limit for pagination or "top N" views. Stable ordering
+    /// is guaranteed by the underlying Vec storage.
+    pub fn get_leaderboard(env: Env, round_id: u32, limit: Option<u32>) -> Vec<Address> {
+        let players: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Players(round_id))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let l = limit.unwrap_or(players.len());
+        let n = if l > players.len() { players.len() } else { l };
+        
+        let mut result = Vec::new(&env);
+        for i in 0..n {
+            result.push_back(players.get(i).unwrap());
+        }
+        result
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -798,15 +818,50 @@ mod test {
         client.submit_solution(&winner2, &1u32, &correct_bytes);
         client.resolve_round(&admin, &1u32, &correct_bytes);
 
-        // 200 pot / 2 winners = 100 each.
         let reward1 = client.claim_reward(&winner1, &1u32);
         let reward2 = client.claim_reward(&winner2, &1u32);
+
         assert_eq!(reward1, 100);
         assert_eq!(reward2, 100);
     }
 
     // ------------------------------------------------------------------
-    // 11. Cannot initialize contract twice
+    // 11. Leaderboard snapshot with limit
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_leaderboard_snapshot() {
+        let env = Env::default();
+        let (client, admin, _, _) = setup(&env);
+        env.mock_all_auths();
+
+        let round_id: u32 = 1;
+        client.create_puzzle(&admin, &round_id, &sha256_of(&env, b"A"), &0);
+
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+        let p3 = Address::generate(&env);
+
+        client.submit_solution(&p1, &round_id, &Bytes::from_slice(&env, b"A"));
+        client.submit_solution(&p2, &round_id, &Bytes::from_slice(&env, b"A"));
+        client.submit_solution(&p3, &round_id, &Bytes::from_slice(&env, b"A"));
+
+        // Full leaderboard
+        let all = client.get_leaderboard(&round_id, &None);
+        assert_eq!(all.len(), 3);
+        assert_eq!(all.get(0).unwrap(), p1);
+        assert_eq!(all.get(1).unwrap(), p2);
+        assert_eq!(all.get(2).unwrap(), p3);
+
+        // Limited leaderboard
+        let top2 = client.get_leaderboard(&round_id, &Some(2));
+        assert_eq!(top2.len(), 2);
+        assert_eq!(top2.get(0).unwrap(), p1);
+        assert_eq!(top2.get(1).unwrap(), p2);
+    }
+
+    // ------------------------------------------------------------------
+    // 12. Cannot initialize contract twice
     // ------------------------------------------------------------------
 
     #[test]
