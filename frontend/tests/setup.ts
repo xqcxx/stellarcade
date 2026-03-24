@@ -1,5 +1,8 @@
-import "@testing-library/jest-dom";
-import { vi } from "vitest";
+import { expect, vi } from "vitest";
+import * as matchers from "@testing-library/jest-dom/matchers";
+import "@testing-library/jest-dom/vitest";
+
+expect.extend(matchers);
 
 // Shim jest to vi for compatibility with legacy tests
 (globalThis as any).jest = vi;
