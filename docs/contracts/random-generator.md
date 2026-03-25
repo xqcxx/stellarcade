@@ -102,7 +102,7 @@ pub fn fulfill_random(env: Env, oracle: Address, request_id: u64, server_seed: B
 `Result<(), Error>`
 
 ### `set_entropy_metadata`
-Set entropy source version metadata. Admin only. Metadata is informational and does not affect randomness output.
+Set entropy source version metadata. Admin only.  Metadata is informational and does not affect randomness output.
 
 ```rust
 pub fn set_entropy_metadata(env: Env, admin: Address, metadata: EntropySourceMetadata) -> Result<(), Error>
@@ -120,17 +120,8 @@ pub fn set_entropy_metadata(env: Env, admin: Address, metadata: EntropySourceMet
 
 `Result<(), Error>`
 
-#### `EntropySourceMetadata` Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `version` | `String` | Semantic version of the entropy source (e.g. "1.0.0") |
-| `source_type` | `String` | Description of entropy source type (e.g. "oracle-committed-seed") |
-| `hash_algorithm` | `String` | Hash algorithm used (e.g. "sha256") |
-| `output_bytes` | `u32` | Number of bytes from digest used for the random value |
-
 ### `get_entropy_metadata`
-Read the current entropy source version metadata. Returns `NotInitialized` if metadata has not been set.
+Read the current entropy source version metadata.
 
 ```rust
 pub fn get_entropy_metadata(env: Env) -> Result<EntropySourceMetadata, Error>
