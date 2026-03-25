@@ -39,6 +39,16 @@ pub enum SettlementStatus {
     Pending = 0,
     Processed = 1,
     Failed = 2,
+    Processing = 3,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchStatus {
+    pub pending: u32,
+    pub processing: u32,
+    pub succeeded: u32,
+    pub failed: u32,
 }
 
 #[contracttype]
@@ -208,20 +218,24 @@ impl SettlementQueue {
 
             if settlement.status == SettlementStatus::Pending {
                 // In a real implementation, this would call out to Reward or Treasury
-                // or just mark as processed if this contract is the final word.
-                // For now, we update status to Processed.
                 settlement.status = SettlementStatus::Processed;
                 env.storage().persistent().set(&settlement_key, &settlement);
                 
                 SettlementProcessed { settlement_id: settlement_id.clone(), status: SettlementStatus::Processed }.publish(&env);
             }
 
-            // Head always increments, effectively "popping" the queue even if status was already changed
+            // Head always increments, effectively "popping" the queue
             head += 1;
             processed_count += 1;
             
-            // Clean up old queue item pointer
-            env.storage().persistent().remove(&item_key);
+            // NOTE: We no longer remove the ItemKey immediately to preserve 
+            // the index -> settlement_id mapping for historical batch status queries.
+            // In a production environment, would implement a separate TTL-based GC.
+            env.storage().persistent().extend_ttl(
+                &item_key,
+                PERSISTENT_BUMP_THRESHOLD,
+                PERSISTENT_BUMP_LEDGERS,
+            );
         }
 
         env.storage().instance().set(&DataKey::QueueHead, &head);
@@ -262,6 +276,49 @@ impl SettlementQueue {
             .get(&DataKey::Settlement(settlement_id))
     }
 
+    /// Query current batch status by index range.
+    pub fn get_batch_status(env: Env, start_index: u64, end_index: u64) -> Result<BatchStatus, Error> {
+        if start_index > end_index {
+            return Err(Error::InvalidState); // Range error
+        }
+
+        let tail: u64 = env.storage().instance().get(&DataKey::QueueTail).unwrap_or(0);
+        if end_index >= tail && tail > 0 {
+             // We could cap or error; for validation, we'll error if start is out of bounds
+             // but here we'll just check if start exists.
+             if start_index >= tail {
+                 return Ok(BatchStatus { pending: 0, processing: 0, succeeded: 0, failed: 0 });
+             }
+        }
+
+        let mut status = BatchStatus {
+            pending: 0,
+            processing: 0,
+            succeeded: 0,
+            failed: 0,
+        };
+
+        // Safety cap for iteration
+        let effective_end = if end_index < tail { end_index } else { tail.saturating_sub(1) };
+
+        for index in start_index..=effective_end {
+            let item_key = DataKey::QueueItem(index);
+            if let Some(settlement_id) = env.storage().persistent().get::<_, Symbol>(&item_key) {
+                let settlement_key = DataKey::Settlement(settlement_id);
+                if let Some(settlement) = env.storage().persistent().get::<_, SettlementData>(&settlement_key) {
+                    match settlement.status {
+                        SettlementStatus::Pending => status.pending += 1,
+                        SettlementStatus::Processed => status.succeeded += 1,
+                        SettlementStatus::Failed => status.failed += 1,
+                        SettlementStatus::Processing => status.processing += 1,
+                    }
+                }
+            }
+        }
+
+        Ok(status)
+    }
+
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
@@ -281,122 +338,5 @@ impl SettlementQueue {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
-mod test {
-    use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
-
-    struct Setup<'a> {
-        _env: Env,
-        client: SettlementQueueClient<'a>,
-        _admin: Address,
-        _reward: Address,
-        _treasury: Address,
-    }
-
-    fn setup() -> Setup<'static> {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let contract_id = env.register(SettlementQueue, ());
-        let client = SettlementQueueClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let reward = Address::generate(&env);
-        let treasury = Address::generate(&env);
-
-        client.init(&admin, &reward, &treasury);
-
-        let client: SettlementQueueClient<'static> = unsafe { core::mem::transmute(client) };
-
-        Setup {
-            _env: env,
-            client,
-            _admin: admin,
-            _reward: reward,
-            _treasury: treasury,
-        }
-    }
-
-    #[test]
-    fn test_init() {
-        let _s = setup();
-        // Verify init values if we had queries for them, or just rely on following tests
-    }
-
-    #[test]
-    fn test_enqueue_and_process() {
-        let s = setup();
-        let user = Address::generate(&s._env);
-        let s_id = symbol_short!("s1");
-
-        s.client.enqueue_settlement(&s_id, &user, &1000i128, &symbol_short!("win"));
-
-        let state = s.client.settlement_state(&s_id).unwrap();
-        assert_eq!(state.status, SettlementStatus::Pending);
-        assert_eq!(state.amount, 1000);
-
-        s.client.process_next(&1);
-
-        let state = s.client.settlement_state(&s_id).unwrap();
-        assert_eq!(state.status, SettlementStatus::Processed);
-    }
-
-    #[test]
-    fn test_fifo_processing() {
-        let s = setup();
-        let user = Address::generate(&s._env);
-        
-        let s1 = symbol_short!("s1");
-        let s2 = symbol_short!("s2");
-
-        s.client.enqueue_settlement(&s1, &user, &100, &symbol_short!("r1"));
-        s.client.enqueue_settlement(&s2, &user, &200, &symbol_short!("r2"));
-
-        s.client.process_next(&1);
-        
-        assert_eq!(s.client.settlement_state(&s1).unwrap().status, SettlementStatus::Processed);
-        assert_eq!(s.client.settlement_state(&s2).unwrap().status, SettlementStatus::Pending);
-
-        s.client.process_next(&1);
-        assert_eq!(s.client.settlement_state(&s2).unwrap().status, SettlementStatus::Processed);
-    }
-
-    #[test]
-    fn test_mark_failed() {
-        let s = setup();
-        let user = Address::generate(&s._env);
-        let s_id = symbol_short!("s1");
-
-        s.client.enqueue_settlement(&s_id, &user, &500, &symbol_short!("fail"));
-        s.client.mark_failed(&s_id, &404);
-
-        let state = s.client.settlement_state(&s_id).unwrap();
-        assert_eq!(state.status, SettlementStatus::Failed);
-        assert_eq!(state.error_code, Some(404));
-    }
-
-    #[test]
-    fn test_unauthorized_enqueue() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let contract_id = env.register(SettlementQueue, ());
-        let client = SettlementQueueClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let reward = Address::generate(&env);
-        let treasury = Address::generate(&env);
-        let _stranger = Address::generate(&env);
-
-        client.init(&admin, &reward, &treasury);
-
-        // This should fail because stranger is not admin or reward contract
-        // However, in mock_all_auths mode, we need to be careful.
-        // We'll trust require_auth logic.
-    }
-}
+mod test;

@@ -98,3 +98,22 @@ pub fn settlement_state(env: Env, settlement_id: Symbol) -> Option<SettlementDat
 
 `Option<SettlementData>`
 
+### `get_batch_status`
+Query current batch status by index range.
+
+```rust
+pub fn get_batch_status(env: Env, start_index: u64, end_index: u64) -> Result<BatchStatus, Error>
+```
+
+#### Parameters
+
+| Name | Type |
+|------|------|
+| `env` | `Env` |
+| `start_index` | `u64` |
+| `end_index` | `u64` |
+
+#### Return Type
+
+`Result<BatchStatus, Error>`
+
