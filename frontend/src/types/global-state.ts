@@ -23,6 +23,8 @@ export interface GlobalState {
   auth: AuthState;
   wallet: WalletState;
   flags: AppFlags;
+  /** Transient optimistic UI patches for game actions (not persisted). */
+  optimisticPatches: Record<string, unknown>;
 }
 
 // Actions
@@ -33,6 +35,9 @@ export type GlobalAction =
   | { type: "WALLET_CLEAR" }
   | { type: "FLAGS_SET"; payload: { key: string; value: boolean } }
   | { type: "FLAGS_CLEAR"; payload: { key: string } }
+  | { type: "OPTIMISTIC_PATCH"; payload: { key: string; value: unknown } }
+  | { type: "OPTIMISTIC_REVERT"; payload: { key: string } }
+  | { type: "OPTIMISTIC_CLEAR" }
   | { type: "RESET_ALL" };
 
 // Domain errors

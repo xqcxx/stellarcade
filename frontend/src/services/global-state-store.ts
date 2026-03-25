@@ -15,6 +15,7 @@ const initialState: GlobalState = {
   auth: { isAuthenticated: false },
   wallet: { connected: false },
   flags: {},
+  optimisticPatches: {},
 };
 
 export class GlobalStateStore {
@@ -81,6 +82,20 @@ export class GlobalStateStore {
         const { [action.payload.key]: _removed, ...rest } = state.flags;
         return { ...state, flags: rest };
       }
+      case "OPTIMISTIC_PATCH":
+        return {
+          ...state,
+          optimisticPatches: {
+            ...state.optimisticPatches,
+            [action.payload.key]: action.payload.value,
+          },
+        };
+      case "OPTIMISTIC_REVERT": {
+        const { [action.payload.key]: _r, ...rest } = state.optimisticPatches;
+        return { ...state, optimisticPatches: rest };
+      }
+      case "OPTIMISTIC_CLEAR":
+        return { ...state, optimisticPatches: {} };
       case "RESET_ALL":
         return initialState;
       default:
@@ -133,6 +148,7 @@ export class GlobalStateStore {
         flags: this.state.flags,
         storedAt: Date.now(),
       };
+      // optimisticPatches intentionally not persisted
       localStorage.setItem(this.storageKey, JSON.stringify(payload));
     } catch (e) {
       // ignore persistence errors

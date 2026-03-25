@@ -5,6 +5,7 @@
  * validate -> submit -> confirm with retry and deterministic transitions.
  */
 
+import type { QueryKey } from "../types/query-cache";
 import { toAppError } from "../utils/v1/errorMapper";
 import { ErrorDomain, ErrorSeverity, type AppError } from "../types/errors";
 import {
@@ -20,6 +21,7 @@ import {
   type TransactionResult,
   type TransactionStateSubscriber,
 } from "../types/transaction-orchestrator";
+import type { Fetcher, OptimisticGameMutationHelper } from "./query-cache-invalidation";
 
 const DEFAULT_RETRY_POLICY: RetryPolicy = {
   maxAttempts: 3,
@@ -537,6 +539,41 @@ export class TransactionOrchestrator {
       }
     }
   }
+}
+
+/**
+ * Run a transaction with optimistic cache apply before execute, revert on failure,
+ * finalize on success (caller supplies final cache value or refetch).
+ */
+export async function executeGameActionWithOptimistic<
+  TInput,
+  TData,
+  TOptimistic,
+>(args: {
+  orchestrator: TransactionOrchestrator;
+  optimistic: OptimisticGameMutationHelper;
+  cacheKey: QueryKey;
+  optimisticData: TOptimistic;
+  request: TransactionRequest<TInput, TData>;
+  buildFinalize?: (success: TData) => TOptimistic | undefined;
+  fetcher?: Fetcher<TOptimistic>;
+}): Promise<ReturnType<TransactionOrchestrator["execute"]>> {
+  const gen = args.optimistic.apply(args.cacheKey, args.optimisticData);
+  const result = await args.orchestrator.execute(args.request);
+  if (!result.success) {
+    args.optimistic.revertIfLatest(args.cacheKey, gen);
+    return result;
+  }
+  const data = result.data as TData;
+  const finalSlice = args.buildFinalize?.(data);
+  if (finalSlice !== undefined) {
+    await args.optimistic.finalize(args.cacheKey, finalSlice);
+  } else if (args.fetcher) {
+    await args.optimistic.finalize(args.cacheKey, undefined, args.fetcher);
+  } else {
+    await args.optimistic.finalize(args.cacheKey, args.optimisticData as TOptimistic);
+  }
+  return result;
 }
 
 export default TransactionOrchestrator;

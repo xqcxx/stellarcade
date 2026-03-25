@@ -422,3 +422,94 @@ export class QueryCacheInvalidator {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Optimistic game mutations (generic apply / revert / finalize)
+// ---------------------------------------------------------------------------
+
+export interface OptimisticMutationRecord<T = unknown> {
+  key: QueryKey;
+  generation: number;
+  previous: T | null;
+  appliedAt: number;
+}
+
+/**
+ * Coordinates optimistic cache updates for game actions with rollback and finalize.
+ * Generic over cache value shape; safe to reuse for multiple mutation types.
+ */
+export class OptimisticGameMutationHelper {
+  private readonly snapshots = new Map<string, OptimisticMutationRecord<unknown>>();
+  private generation = 0;
+
+  constructor(private readonly cache: QueryCache) {}
+
+  /**
+   * Apply optimistic data; snapshots prior value once per key until revert/finalize.
+   * @returns Monotonic generation for race handling (revertIfLatest).
+   */
+  apply<T>(key: QueryKey, optimisticData: T, policy?: QueryPolicy): number {
+    const ks = keyToString(key);
+    if (!this.snapshots.has(ks)) {
+      const prev = this.cache.get<T>(key)?.data ?? null;
+      this.snapshots.set(ks, {
+        key,
+        generation: 0,
+        previous: prev,
+        appliedAt: Date.now(),
+      });
+    }
+    this.generation += 1;
+    const snap = this.snapshots.get(ks)!;
+    snap.generation = this.generation;
+    this.cache.set(key, optimisticData, policy);
+    return this.generation;
+  }
+
+  revert(key: QueryKey): void {
+    const ks = keyToString(key);
+    const snap = this.snapshots.get(ks);
+    if (!snap) return;
+    if (snap.previous === null) {
+      this.cache.remove(key);
+    } else {
+      this.cache.set(key, snap.previous as never);
+    }
+    this.snapshots.delete(ks);
+  }
+
+  /**
+   * Revert only if this generation is still the active optimistic write (latest wins).
+   */
+  revertIfLatest(key: QueryKey, generation: number): void {
+    const snap = this.snapshots.get(keyToString(key));
+    if (!snap || snap.generation !== generation) return;
+    this.revert(key);
+  }
+
+  /**
+   * Drop optimistic snapshot and optionally set final data or refetch via fetcher.
+   */
+  async finalize<T>(
+    key: QueryKey,
+    finalData?: T,
+    fetcher?: Fetcher<T>,
+  ): Promise<{ data: T } | { error: AppError }> {
+    this.snapshots.delete(keyToString(key));
+    if (finalData !== undefined) {
+      this.cache.set(key, finalData);
+      return { data: finalData };
+    }
+    if (fetcher) {
+      this.cache.registerFetcher(key, fetcher);
+      return this.cache.refetch<T>(key);
+    }
+    return {
+      error: toAppError(
+        new Error("finalize requires finalData or fetcher"),
+        undefined,
+        { key },
+      ),
+    };
+  }
+}
